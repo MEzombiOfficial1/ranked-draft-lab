@@ -29,6 +29,13 @@ cache="${RUNNER_TEMP:-/tmp}/img-cache"; mkdir -p "$cache/brawler" "$cache/map" d
     [ -s "$f" ] && exit 0
     if [ "$kind" = brawler ]; then url="https://cdn.brawlify.com/brawlers/borderless/$id.png"; else url="https://cdn.brawlify.com/maps/regular/$id.png"; fi
     curl -sfL --max-time 20 -o "$f.tmp" "$url" && mv "$f.tmp" "$f" || rm -f "$f.tmp"' || true
+jq -r '.brawler_names | to_entries[] | "\(.key)\t\(.value)"' data/stats/summary.json | while IFS=$'\t' read -r id name; do
+  f="$cache/brawler/$id.png"; [ -s "$f" ] && continue
+  file=$(echo "$name" | tr 'A-Z' 'a-z' | sed -E 's/(^|[ -])([a-z])/\1\u\2/g; s/ /_/g')1-pfp.png
+  src=$(curl -sf --max-time 20 "https://brawlstars.fandom.com/api.php?action=query&titles=File:$file&prop=imageinfo&iiprop=url&format=json" |
+        jq -r '.query.pages[].imageinfo[0].url // empty' 2>/dev/null) || src=""
+  [ -n "$src" ] && curl -sfL --max-time 20 -A "Mozilla/5.0" -o "$f.tmp" "$src" && mv "$f.tmp" "$f" || rm -f "$f.tmp"
+done || true
 cp "$cache"/brawler/*.png dist/img/brawler/ 2>/dev/null || true
 cp "$cache"/map/*.png dist/img/map/ 2>/dev/null || true
 echo "Bundled images: $(ls dist/img/brawler | wc -l) brawlers, $(ls dist/img/map | wc -l) maps"
