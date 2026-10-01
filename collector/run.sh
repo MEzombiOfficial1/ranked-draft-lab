@@ -27,7 +27,11 @@ while :; do
   bash collector/db_release.sh upload "$work" || exit 1
   bash collector/commit_stats.sh || exit 1
   if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && (( end - $(date +%s) > 300 )); then
-    bash deploy/deploy.sh >/dev/null 2>&1 && echo "Site refreshed." || echo "::warning::Mid-run site deploy failed (non-fatal)"
+    site=$(bash deploy/deploy.sh 2>/dev/null | sed -n 's/^Site: //p') && echo "Site refreshed." || echo "::warning::Mid-run site deploy failed (non-fatal)"
+  fi
+  if [ -n "${DISCORD_WEBHOOK_URL:-}" ] && (( end - $(date +%s) > 300 )); then
+    { python3 -c "import PIL" 2>/dev/null || pip install --quiet pillow; } &&
+      SITE_URL="${site:-${SITE_URL:-}}" python3 collector/discord_report.py || echo "::warning::Discord report failed (non-fatal)"
   fi
   if (( code == 2 )); then echo "::error::API rejected the key (HTTP 403). Check BRAWL_STARS_API_KEY and its whitelisted IP."; fatal=1; break; fi
   if (( code == 3 )); then echo "::warning::API unavailable (maintenance?). Stopping this run early."; break; fi
