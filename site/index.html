@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ranked Draft Lab</title>
+  <meta name="description" content="Live Brawl Stars Ranked draft helper built on continuously collected ranked games.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23ffb020'/><path d='M18 44 32 14l14 30H36l-4-9-4 9z' fill='%23111'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/draft"><span class="logo">▲</span> Ranked Draft Lab</a>
+    <nav>
+      <a href="#/draft" data-route="draft">Draft</a>
+      <a href="#/practice" data-route="practice">Practice</a>
+      <a href="#/meta" data-route="meta">Meta</a>
+      <a href="#/brawlers" data-route="brawlers">Brawlers</a>
+      <a href="#/status" data-route="status">Data</a>
+    </nav>
+  </header>
+  <main id="app"><div class="loading">Loading ranked data…</div></main>
+  <footer class="foot" id="foot"></footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

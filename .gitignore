@@ -1,0 +1,6 @@
+__pycache__/
+/work/
+/dist/
+node_modules/
+worker/wrangler.generated.toml
+MEMORY.md
