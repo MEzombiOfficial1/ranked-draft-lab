@@ -7,7 +7,8 @@ git add data/stats
 if git diff --cached --quiet; then echo "Stats unchanged."; exit 0; fi
 git commit -qm "Update ranked stats $(date -u +%Y-%m-%dT%H:%MZ)"
 for i in 1 2 3 4; do
-  if git pull -q --rebase origin "$branch" && git push -q origin "HEAD:$branch"; then echo "Stats pushed."; exit 0; fi
+  if git fetch -q origin "$branch" && git rebase -q -X theirs "origin/$branch" && git push -q origin "HEAD:$branch"; then echo "Stats pushed."; exit 0; fi
+  git rebase --abort 2>/dev/null || true
   sleep $((2 ** i))
 done
 echo "Could not push stats." >&2
