@@ -23,7 +23,7 @@ function h(tag, attrs = {}, ...kids) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
-    else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
+    else if (k === "style" && typeof v === "object") for (const [p, x] of Object.entries(v)) p.startsWith("--") ? el.style.setProperty(p, x) : (el.style[p] = x);
     else el.setAttribute(k, v === true ? "" : v);
   }
   for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : String(kid));
@@ -128,119 +128,230 @@ function accountBar() {
     msg);
 }
 
-const SEQ_BANS = [["A", "ban", 0], ["A", "ban", 1], ["A", "ban", 2], ["B", "ban", 0], ["B", "ban", 1], ["B", "ban", 2]];
-function pickSeq(weFirst) {
-  const n = { A: 0, B: 0 };
-  return PICK_ORDER.map((t) => { const team = weFirst ? t : (t === "A" ? "B" : "A"); return [team, "pick", n[team]++]; });
-}
+const other = (t) => (t === "A" ? "B" : "A");
+const pickSeq = (weFirst) => PICK_ORDER.map((t) => (weFirst ? t : other(t)));
 function freshDraft(mapKey) {
-  return { mapKey, bracket: store.get("bracket", "high"), weFirst: true, A: { ban: [null, null, null], pick: [null, null, null] },
-           B: { ban: [null, null, null], pick: [null, null, null] }, active: ["A", "ban", 0] };
+  return { v: 2, mapKey, bracket: store.get("bracket", "high"), weFirst: true, A: [], B: [], bans: [], turn: null, enemyView: false, tab: "picks", hist: [] };
 }
+const validDraft = (d) => d && d.v === 2 && [d.A, d.B, d.bans, d.hist].every(Array.isArray) && model.mapIndex.has(d.mapKey);
 let draft;
 
-function draftSeq() { return [...SEQ_BANS, ...pickSeq(draft.weFirst)]; }
-function advance() {
-  const seq = draftSeq();
-  const cur = seq.findIndex(([t, k, i]) => t === draft.active[0] && k === draft.active[1] && i === draft.active[2]);
-  for (let j = 1; j <= seq.length; j++) {
-    const [t, k, i] = seq[(cur + j) % seq.length];
-    if (draft[t][k][i] == null) { draft.active = [t, k, i]; return; }
-  }
+function autoTurn() {
+  const n = draft.A.length + draft.B.length;
+  if (n >= 6) return null;
+  const seq = pickSeq(draft.weFirst);
+  if (seq.slice(0, n).filter((t) => t === "A").length === draft.A.length) return seq[n];
+  if (draft.A.length !== draft.B.length) return draft.A.length < draft.B.length ? "A" : "B";
+  return draft.weFirst ? "A" : "B";
 }
-function taken() { return new Set([...draft.A.ban, ...draft.A.pick, ...draft.B.ban, ...draft.B.pick].filter((x) => x != null)); }
-function assign(id) {
-  if (taken().has(id)) return;
-  const [t, k, i] = draft.active;
-  draft[t][k][i] = id;
-  advance();
+function currentTurn() {
+  if (draft.A.length + draft.B.length >= 6) return null;
+  const t = draft.turn || autoTurn();
+  return draft[t].length >= 3 ? other(t) : t;
+}
+const usedSet = () => new Set([...draft.A, ...draft.B, ...draft.bans]);
+const drop = (list, id) => { const i = list.indexOf(id); if (i >= 0) list.splice(i, 1); };
+function pickBrawler(id) {
+  const t = currentTurn();
+  if (!t || usedSet().has(id)) return;
+  draft[t].push(id);
+  draft.hist.push(["pick", t, id]);
+  draft.turn = null;
   renderDraft();
 }
-function clearSlot(t, k, i) { draft[t][k][i] = null; draft.active = [t, k, i]; renderDraft(); }
+function banBrawler(id) {
+  if (draft.bans.includes(id)) drop(draft.bans, id);
+  else if (!usedSet().has(id) && draft.bans.length < 6) { draft.bans.push(id); draft.hist.push(["ban", null, id]); }
+  else return;
+  renderDraft();
+}
+function unpick(t, id) {
+  drop(draft[t], id);
+  draft.hist = draft.hist.filter((e) => e[2] !== id);
+  draft.turn = null;
+  renderDraft();
+}
+function undo() {
+  const last = draft.hist.pop();
+  if (!last) return;
+  drop(last[0] === "pick" ? draft[last[1]] : draft.bans, last[2]);
+  draft.turn = null;
+  renderDraft();
+}
+function toggleTurn() {
+  if (!draft.A.length && !draft.B.length) { draft.weFirst = !draft.weFirst; draft.turn = null; }
+  else { const t = currentTurn(); if (t) draft.turn = other(t); }
+  renderDraft();
+}
+let holding = false, quietUntil = 0;
+document.addEventListener("pointerup", () => { if (holding) { holding = false; quietUntil = Date.now() + 150; } }, true);
+document.addEventListener("pointercancel", () => { if (holding) { holding = false; quietUntil = Date.now() + 150; } }, true);
+document.addEventListener("pointerdown", () => { holding = false; quietUntil = 0; }, true);
+const quiet = () => holding || Date.now() < quietUntil;
+function pressable(el, onTap, onHold) {
+  let timer = null;
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  const hold = () => { cancel(); holding = true; navigator.vibrate?.(15); onHold(); };
+  el.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" || !e.isPrimary) return;
+    cancel();
+    timer = setTimeout(hold, 450);
+  });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => el.addEventListener(ev, cancel));
+  el.addEventListener("click", () => { if (!quiet()) onTap(); });
+  el.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (timer) return hold();
+    if (!quiet()) onHold();
+  });
+  return el;
+}
+
+function recommendations(ctx, side) {
+  const state = { ours: draft[side], theirs: draft[other(side)], bans: draft.bans };
+  const sideFirst = side === "A" ? draft.weFirst : !draft.weFirst;
+  return applyBook(ctx, suggest(ctx, state, { limit: 40, allowed: side === "A" ? myAllowed() : null, weFirst: sideFirst }), state, sideFirst).slice(0, 14);
+}
+const recValue = (s) => s.projected ?? s.win;
 
 function renderDraft() {
   store.set("draft", draft);
+  if (!BRACKETS[draft.bracket]) draft.bracket = store.get("bracket", "high");
   let ctx;
-  if (!BRACKETS[draft.bracket]) draft.bracket = draft.high ? "high" : store.get("bracket", "high");
   try { ctx = context(model, draft.mapKey, draft.bracket); } catch { draft = freshDraft(defaultMap()); ctx = context(model, draft.mapKey, draft.bracket); }
-  const mapObj = ctx.mapObj;
-  const A = draft.A.pick.filter((x) => x != null), B = draft.B.pick.filter((x) => x != null);
-  const bans = [...draft.A.ban, ...draft.B.ban].filter((x) => x != null);
-  const seqPick = pickSeq(draft.weFirst);
-  const orderOf = (t, i) => seqPick.findIndex(([tt, , ii]) => tt === t && ii === i) + 1;
+  const { A, B, bans } = draft;
+  const turn = currentTurn();
+  const side = turn && (draft.enemyView ? other(turn) : turn);
+  const banTab = draft.tab === "bans" && bans.length < 6;
+  const p = A.length || B.length ? winProbability(ctx, A, B) : 0.5;
+  const recs = side && !banTab ? recommendations(ctx, side) : [];
+  const banRecs = banTab ? suggestBans(ctx, { ours: A, theirs: B, bans }, { weFirst: draft.weFirst }) : [];
+  const rank = new Map(recs.slice(0, 5).map((s, i) => [s.id, i + 1]));
+  const seq = pickSeq(draft.weFirst);
+  const orderOf = (t, i) => seq.map((x, k) => [x, k + 1]).filter(([x]) => x === t)[i][1];
+
+  const pslot = (t, i) => {
+    const id = draft[t][i];
+    const next = turn === t && i === draft[t].length;
+    if (id == null) return h("div", { class: `pslot empty${next ? " next" : ""}` }, h("span", {}, `${orderOf(t, i)}`));
+    return h("button", { class: "pslot", title: `${bname(id)}: tap to remove`, onclick: () => unpick(t, id) },
+      portrait(id, 200), h("span", { class: "pn" }, bname(id)));
+  };
+  const sideBox = (t) => h("div", { class: `side ${t}${turn === t ? " turn" : ""}` },
+    h("div", { class: "sidehead" }, t === "A" ? "Your team" : "Enemy team",
+      h("span", {}, (t === "A") === draft.weFirst ? "1st pick" : "2nd pick")),
+    h("div", { class: "pslots" }, [0, 1, 2].map((i) => pslot(t, i))),
+    compositionLine(ctx, draft[t]));
+  const banRow = h("div", { class: "banrow", title: "Bans (right-click or long-press a brawler)" },
+    Array.from({ length: 6 }, (_, i) => bans[i] != null
+      ? h("button", { class: "bslot on", title: `Unban ${bname(bans[i])}`, onclick: () => banBrawler(bans[i]) }, portrait(bans[i], 34))
+      : h("span", { class: "bslot" })));
+  const arena = h("div", { class: "arena" }, sideBox("A"),
+    h("div", { class: "vs" }, h("div", { class: "vsword" }, "VS"),
+      h("div", { class: "winnum", style: { color: p >= 0.5 ? "var(--blue)" : "var(--red)" } }, pct(p)),
+      h("div", { class: "winbar" }, h("div", { style: { width: pct(p, 2) } })),
+      h("div", { class: "small muted" }, "your win chance"), banRow),
+    sideBox("B"));
+
+  let panel;
+  const tabs = h("div", { class: "seg" }, [["picks", "Picks"], ["bans", "Bans"]].map(([v, l]) =>
+    h("button", { class: (v === "bans") === banTab ? "on" : "", onclick: () => { draft.tab = v; renderDraft(); } }, l)));
+  if (!turn) {
+    panel = h("div", { class: "card recs" }, h("div", { class: "recshead" }, h("h3", {}, `Draft complete · ${pct(p)} to win`)), breakdown(ctx, A, B));
+  } else {
+    const items = banTab ? banRecs.slice(0, 5).map((s) => ({ id: s.id, v: s.gain, lab: s.gain > 0.001 ? `+${(s.gain * 100).toFixed(1)}` : pct(s.map.p, 0) }))
+      : recs.slice(0, 5).map((s) => ({ id: s.id, v: recValue(s), lab: pct(recValue(s)), book: s.book }));
+    const vals = items.map((x) => x.v), lo = Math.min(...vals), hi = Math.max(...vals);
+    const title = banTab ? "Best bans" : side === "A" ? (turn === "A" ? "Your best picks" : "Your best picks (after their pick)") : "Enemy's likely picks";
+    panel = h("div", { class: "card recs" },
+      h("div", { class: "recshead" }, h("h3", {}, title), tabs),
+      h("div", { class: "t5list" }, items.map((x, i) => pressable(h("button", { class: `t5${banTab ? " ban" : ""}`, title: banTab ? `Ban ${bname(x.id)}` : `Pick ${bname(x.id)}`,
+        style: { "--v": (0.3 + 0.7 * (hi > lo ? (x.v - lo) / (hi - lo) : 1)).toFixed(3) } },
+        portrait(x.id, 46), h("span", { class: "bar" }, h("b", {}, x.lab), h("span", { class: "bn" }, `${i + 1}. ${bname(x.id)}${x.book ? " 📘" : ""}`))),
+        () => (banTab ? banBrawler(x.id) : pickBrawler(x.id)), () => banBrawler(x.id)))),
+      h("div", { class: "small muted" }, banTab ? "How much each ban improves your best reachable draft (full-draft search)."
+        : "Projected win chance after the rest of the draft, assuming the other side answers well."));
+  }
 
   const sel = h("select", { "aria-label": "Map", onchange: (e) => { draft.mapKey = e.target.value; renderDraft(); } });
   mapOptions(sel, draft.mapKey);
-  const seg = (opts, val, set) => h("div", { class: "seg" }, opts.map(([v, label]) => h("button", { class: v === val ? "on" : "", onclick: () => { set(v); renderDraft(); } }, label)));
-  const top = h("div", { class: "draft-top" }, sel,
+  const switchEl = h("label", { class: "switch" }, h("input", { type: "checkbox", checked: draft.enemyView, onchange: (e) => { draft.enemyView = e.target.checked; renderDraft(); } }),
+    h("span", {}), draft.enemyView ? "Showing enemy's view" : "Show enemy's view");
+  const controls = h("div", { class: "controls" },
+    h("div", { class: "mapsel" }, mapImage(ctx.mapObj, "mapmini"), sel),
     bracketSeg(draft.bracket, (v) => { draft.bracket = v; store.set("bracket", v); renderDraft(); }),
-    seg([[true, "We pick first"], [false, "They pick first"]], draft.weFirst, (v) => { draft.weFirst = v; }),
-    h("button", { class: "btn", onclick: () => { const k = draft.mapKey, br = draft.bracket, wf = draft.weFirst; draft = freshDraft(k); draft.bracket = br; draft.weFirst = wf; renderDraft(); } }, "Reset draft"));
+    h("button", { class: `btn turnbtn ${turn || ""}`, onclick: toggleTurn, title: A.length || B.length ? "Switch whose turn it is" : "Switch who picks first" },
+      turn ? `TURN · ${turn === "A" ? "You" : "Enemy"}` : "TURN"),
+    h("button", { class: "btn", onclick: undo, disabled: !draft.hist.length }, "UNDO"),
+    h("button", { class: "btn", onclick: () => { const d = freshDraft(draft.mapKey); d.bracket = draft.bracket; d.weFirst = draft.weFirst; draft = d; renderDraft(); } }, "RESET"),
+    switchEl,
+    profile ? h("button", { class: `btn mine${mine.on ? " on" : ""}`, onclick: () => { mine.on = !mine.on; store.set("mine", mine); renderDraft(); } },
+      `👤 My brawlers: ${mine.on ? "On" : "Off"}`) : null);
+
+  const allowedSet = myAllowed();
+  const sortMode = store.get("gridSort", "strength");
+  const search = h("input", { type: "search", class: "search", placeholder: "Search brawler · Enter = pick · Shift+Enter = ban", value: store.get("gridSearch", ""), enterkeyhint: "go" });
+  const grid = h("div", { class: "pgrid" });
+  const used = usedSet();
+  const fill = () => {
+    const q = search.value.trim().toLowerCase();
+    store.set("gridSearch", search.value);
+    let ids = model.ids.filter((id) => bname(id).toLowerCase().includes(q));
+    if (sortMode === "strength") ids = ids.sort((a, b) => mapStats(ctx, b).p - mapStats(ctx, a).p);
+    else ids = ids.sort((a, b) => bname(a).localeCompare(bname(b)));
+    grid.replaceChildren(...ids.map((id) => {
+      const ms = mapStats(ctx, id);
+      const col = ms.p >= 0.53 ? "var(--good)" : ms.p <= 0.47 ? "var(--bad)" : "var(--muted)";
+      const banned = bans.includes(id);
+      const cls = `bx${banned ? " banned" : used.has(id) ? " used" : ""}${allowedSet && !allowedSet.has(id) ? " notmine" : ""}${rank.has(id) ? " rec" : ""}`;
+      return pressable(h("button", { class: cls, title: `${bname(id)} · map WR ${pct(ms.p)} (${ms.games} games) · right-click / long-press to ${banned ? "unban" : "ban"}` },
+        h("span", { class: "im" }, portrait(id, 200), rank.has(id) ? h("span", { class: "rk" }, rank.get(id)) : null),
+        h("span", { class: "bn" }, bname(id)), h("span", { class: "wr", style: { color: col } }, ms.games ? pct(ms.p, 0) : "–")),
+        () => pickBrawler(id), () => banBrawler(id));
+    }));
+    grid.querySelectorAll(".pt").forEach((el) => { el.style.width = "100%"; el.style.height = "100%"; });
+    return ids;
+  };
+  search.addEventListener("input", fill);
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { search.value = ""; fill(); return; }
+    if (e.key !== "Enter") return;
+    const first = fill().find((id) => !used.has(id));
+    if (first == null) return;
+    search.value = "";
+    store.set("gridSearch", "");
+    e.shiftKey ? banBrawler(first) : pickBrawler(first);
+  });
+  const sortSeg = h("div", { class: "seg" }, [["strength", "Best on map"], ["name", "A–Z"]].map(([v, l]) =>
+    h("button", { class: v === sortMode ? "on" : "", onclick: () => { store.set("gridSort", v); renderDraft(); } }, l)));
+  const mini = turn ? h("div", { class: `mini ${turn}` }, h("span", { class: "who" }, turn === "A" ? "Your pick" : "Enemy pick"),
+    h("span", { class: "mw" }, pct(p, 0)),
+    (banTab ? banRecs : recs).slice(0, 4).map((s) => pressable(h("button", { class: "mr", title: bname(s.id) }, portrait(s.id, 30),
+      h("span", {}, banTab ? `+${(s.gain * 100).toFixed(1)}` : pct(recValue(s), 0))),
+      () => (banTab ? banBrawler(s.id) : pickBrawler(s.id)), () => banBrawler(s.id)))) : null;
+  const dock = h("div", { class: "dock" }, h("div", { class: "dockrow" }, search, sortSeg), mini);
+  fill();
+  setTimeout(() => { if (window.matchMedia("(pointer: fine)").matches) search.focus({ preventScroll: true }); }, 0);
 
   const note = noteFor(draft.mapKey);
-  const banner = h("div", { class: "card mapbanner" }, mapImage(mapObj),
-    h("div", {}, h("div", { class: "title display" }, mapObj.map),
-      h("div", { class: "row" }, h("span", { class: "pill", style: { color: MODE_COLORS[mapObj.mode] } }, modeName(mapObj.mode)),
-        h("span", { class: "pill" }, `${ctx.battles.toLocaleString()} ranked games · ${BRACKETS[ctx.bracket]}`),
-        ctx.bracket !== "all" && ctx.battles < 300 ? h("span", { class: "pill" }, "Few games in this bracket: blended with all-rank data") : null),
-      note ? h("div", { class: "note" }, "🤖 ", note) : null));
+  const listHead = banTab ? "All ban suggestions" : side === "A" ? "All pick suggestions & why" : "Enemy's strongest options & why";
+  const list = turn ? h("div", { class: "sugg" }, banTab ? banRecs.map((s, i) => suggestionCard(ctx, s, i, "ban")) : recs.map((s, i) => suggestionCard(ctx, s, i, "pick"))) : null;
+  const details = h("div", { class: "layout details" },
+    h("div", { class: "card" }, turn ? [h("h3", {}, listHead), allowedSet && side === "A" && !banTab
+      ? h("div", { class: "small", style: { color: "var(--accent)", marginBottom: "6px" } }, `Only your brawlers at ${mine.minPower > 1 ? `power ${mine.minPower}${mine.minPower < 11 ? "+" : ""}` : "any power"} (${allowedSet.size})`) : null, list]
+      : [h("h3", {}, "Final draft breakdown"), breakdown(ctx, A, B)],
+      h("button", { class: "btn primary", style: { marginTop: "12px" }, onclick: () => aiCoach(ctx) }, "🤖 Ask the AI coach"),
+      h("div", { class: "aibox muted", id: "aibox" })),
+    h("div", {}, h("div", { class: "card mapbanner" }, mapImage(ctx.mapObj),
+      h("div", {}, h("div", { class: "title display" }, ctx.mapObj.map),
+        h("div", { class: "row" }, h("span", { class: "pill", style: { color: MODE_COLORS[ctx.mapObj.mode] } }, modeName(ctx.mapObj.mode)),
+          h("span", { class: "pill" }, `${ctx.battles.toLocaleString()} ranked games · ${BRACKETS[ctx.bracket]}`)),
+        note ? h("div", { class: "note" }, "🤖 ", note) : null)),
+      accountBar()));
 
-  const slot = (t, k, i) => {
-    const id = draft[t][k][i];
-    const active = draft.active[0] === t && draft.active[1] === k && draft.active[2] === i;
-    const el = h("button", { class: `slot ${k}${id != null ? " filled" : ""}${active ? " active" : ""}`,
-      onclick: () => (id != null && active ? clearSlot(t, k, i) : ((draft.active = [t, k, i]), renderDraft())),
-      oncontextmenu: (e) => { e.preventDefault(); clearSlot(t, k, i); }, title: id != null ? "Click again (or right-click) to clear" : "Select slot" });
-    if (k === "pick") el.append(h("span", { class: "order" }, `#${orderOf(t, i)}`));
-    if (id != null) {
-      el.append(portrait(id, k === "ban" ? 50 : 200));
-      if (k === "pick") el.append(h("span", { class: "nm" }, bname(id)));
-      el.append(h("span", { class: "x" }, "✕"));
-    } else el.append(k === "ban" ? "ban" : "pick");
-    if (k === "pick" && id != null) { el.querySelector(".pt").style.width = "100%"; el.querySelector(".pt").style.height = "100%"; }
-    return el;
-  };
-  const teamBox = (t, label) => h("div", { class: `team ${t}` },
-    h("h3", {}, label, h("span", { class: "small muted" }, t === "A" ? (draft.weFirst ? "1st pick" : "2nd pick") : (draft.weFirst ? "2nd pick" : "1st pick"))),
-    h("div", { class: "label" }, "Bans"), h("div", { class: "slots" }, [0, 1, 2].map((i) => slot(t, "ban", i))),
-    h("div", { class: "label" }, "Picks"), h("div", { class: "slots" }, [0, 1, 2].map((i) => slot(t, "pick", i))),
-    compositionLine(ctx, draft[t].pick.filter((x) => x != null)));
-  const p = A.length || B.length ? winProbability(ctx, A, B) : 0.5;
-  const [at, ak] = draft.active;
-  const complete = A.length === 3 && B.length === 3;
-  const phaseText = complete ? "Draft complete" : `${at === "A" ? "Your" : "Enemy"} ${ak}`;
-  const mid = h("div", { class: "mid card" },
-    h("div", { class: "phase" }, phaseText),
-    h("div", { class: "winbox" }, h("div", { class: "winnum", style: { color: p >= 0.5 ? "var(--blue)" : "var(--red)" } }, pct(p)),
-      h("div", { class: "winbar" }, h("div", { style: { width: pct(p, 2) } })), h("div", { class: "small muted" }, "Your predicted win chance")),
-    h("button", { class: "btn primary", onclick: () => aiCoach(ctx, A, B, bans) }, "🤖 AI coach"));
-  const board = h("div", { class: "board" }, teamBox("A", "Your team"), mid, teamBox("B", "Enemy team"));
-
-  const ours = at === "A";
-  const state = { ours: ours ? A : B, theirs: ours ? B : A, bans };
-  const sideFirst = ours ? draft.weFirst : !draft.weFirst;
-  let head, list;
-  if (complete) {
-    head = h("h3", {}, "Final draft breakdown");
-    list = breakdown(ctx, A, B);
-  } else if (ak === "ban") {
-    head = h("h3", {}, ours ? "Best bans for you" : "What the enemy will probably ban",
-      h("div", { class: "small muted" }, "Simulates the full draft with and without each ban: how much it improves your side's best achievable draft"));
-    list = h("div", { class: "sugg" }, suggestBans(ctx, state, { weFirst: sideFirst }).map((s, i) => suggestionCard(ctx, s, i, "ban")));
-  } else {
-    const allowed = ours ? myAllowed() : null;
-    const sug = applyBook(ctx, suggest(ctx, state, { limit: 40, allowed, weFirst: sideFirst }), state, sideFirst).slice(0, 14);
-    head = h("h3", {}, ours ? "Best picks for you" : "Enemy's strongest options",
-      h("div", { class: "small muted" }, ours ? "Ranked by projected win chance after the rest of the draft, assuming the enemy answers well (lookahead search over thousands of continuations)"
-        : "Predicted from their side with the same lookahead: expect one of these"),
-      allowed ? h("div", { class: "small", style: { color: "var(--accent)" } }, `Only your brawlers at ${mine.minPower > 1 ? `power ${mine.minPower}${mine.minPower < 11 ? "+" : ""}` : "any power"} (${allowed.size})`) : null);
-    list = h("div", { class: "sugg" }, sug.map((s, i) => suggestionCard(ctx, s, i, "pick")));
-  }
-  const aiOut = h("div", { class: "aibox muted", id: "aibox" });
-  const left = h("div", { class: "card" }, head, list, aiOut);
-  const right = h("div", { class: "card" }, brawlerGrid(ctx));
-
-  app.replaceChildren(top, accountBar(), banner, board, h("div", { class: "layout" }, left, right));
+  app.replaceChildren(h("div", { class: "top2" }, arena, panel), controls,
+    h("div", { class: "hint small muted" }, "Tap a brawler to pick it for the side whose turn it is · right-click or long-press to ban · tap a picked brawler to remove it · TURN before the first pick switches who picks first"),
+    dock, grid, details);
 }
 
 function applyBook(ctx, sug, state, sideFirst) {
@@ -296,7 +407,7 @@ function reasonChips(s) {
 function suggestionCard(ctx, s, i, kind) {
   const ms = s.map;
   const stats = `Map WR ${pct(ms.p)} · pick ${pct(ms.pickRate)} · ${ms.games} games`;
-  return h("div", { class: "sg", onclick: () => assign(s.id), title: "Click to put in the active slot" },
+  return pressable(h("div", { class: "sg", title: kind === "ban" ? "Click to ban" : "Click to pick · right-click / long-press to ban" },
     h("div", { class: "row", style: { gap: "6px", flexWrap: "nowrap" } }, portrait(s.id, 48)),
     h("div", {}, h("div", { class: "name" }, h("span", { class: "rankno" }, i + 1), bname(s.id), " ",
       kind === "pick" ? h("span", { class: `conf ${s.confidence}` }, s.confidence) : null,
@@ -306,7 +417,8 @@ function suggestionCard(ctx, s, i, kind) {
     h("div", { class: "score" }, kind === "pick"
       ? [h("b", {}, pct(s.projected ?? s.win)), h("span", { class: "small muted" }, s.projected != null ? `projected · now ${pct(s.win, 0)}` : "win chance now")]
       : [h("b", { class: s.gain > 0.001 ? "good" : "" }, s.gain > 0.001 ? `+${(s.gain * 100).toFixed(1)}` : pct(ms.p, 0)),
-         h("span", { class: "small muted" }, s.gain > 0.001 ? "draft points" : "map WR")]));
+         h("span", { class: "small muted" }, s.gain > 0.001 ? "draft points" : "map WR")])),
+    () => (kind === "ban" ? banBrawler(s.id) : pickBrawler(s.id)), () => banBrawler(s.id));
 }
 function breakdown(ctx, A, B) {
   const rows = [];
@@ -318,52 +430,21 @@ function breakdown(ctx, A, B) {
   for (const a of A) for (const b of B) add(`${bname(a)} vs ${bname(b)}`, counter(ctx, a, b).res);
   return h("div", {}, h("p", { class: "muted small" }, "Approximate effect of each factor on your win chance"), h("table", {}, h("tbody", {}, rows)));
 }
-function brawlerGrid(ctx) {
-  const used = taken();
-  const allowedSet = myAllowed();
-  const sortMode = store.get("gridSort", "strength");
-  const search = h("input", { type: "search", placeholder: "Search brawler… (Enter = pick first match)", value: store.get("gridSearch", "") });
-  const grid = h("div", { class: "bgrid" });
-  const fill = () => {
-    const q = search.value.trim().toLowerCase();
-    store.set("gridSearch", search.value);
-    let ids = model.ids.filter((id) => bname(id).toLowerCase().includes(q));
-    if (sortMode === "strength") ids = ids.sort((a, b) => mapStats(ctx, b).p - mapStats(ctx, a).p);
-    grid.replaceChildren(...ids.map((id) => {
-      const ms = mapStats(ctx, id);
-      const col = ms.p >= 0.53 ? "var(--good)" : ms.p <= 0.47 ? "var(--bad)" : "var(--text)";
-      const notMine = allowedSet && !allowedSet.has(id);
-      return h("button", { class: `bt${used.has(id) ? " used" : ""}${notMine ? " notmine" : ""}`, title: `${bname(id)}: map WR ${pct(ms.p)} (${ms.games} games)`,
-        onclick: () => assign(id) }, portrait(id, 200), h("span", { class: "wr", style: { color: col } }, ms.games ? pct(ms.p, 0) : "–"));
-    }));
-    grid.querySelectorAll(".pt").forEach((p) => { p.style.width = "100%"; p.style.height = "100%"; });
-    return ids;
-  };
-  search.addEventListener("input", fill);
-  search.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { const first = fill().find((id) => !used.has(id)); if (first != null) { search.value = ""; store.set("gridSearch", ""); assign(first); } }
-  });
-  const sortSeg = h("div", { class: "seg" }, [["strength", "Map strength"], ["name", "A–Z"]].map(([v, l]) =>
-    h("button", { class: v === sortMode ? "on" : "", onclick: () => { store.set("gridSort", v); renderDraft(); } }, l)));
-  fill();
-  setTimeout(() => { if (window.matchMedia("(pointer: fine)").matches) search.focus(); }, 0);
-  return h("div", {}, h("div", { class: "gridtools" }, search, sortSeg), grid);
-}
-
-async function aiCoach(ctx, A, B, bans) {
+async function aiCoach(ctx) {
   const box = document.getElementById("aibox");
   box.textContent = "Thinking…";
-  const [at, ak] = draft.active;
-  const ours = at === "A";
-  const state = { ours: ours ? A : B, theirs: ours ? B : A, bans };
-  const top = ak === "pick" ? suggest(ctx, state, { limit: 8, allowed: ours ? myAllowed() : null, weFirst: ours ? draft.weFirst : !draft.weFirst }) : [];
+  const { A, B, bans } = draft;
+  const turn = currentTurn();
+  const side = turn && (draft.enemyView ? other(turn) : turn);
+  const top = side && draft.tab !== "bans" ? recommendations(ctx, side).slice(0, 8) : [];
+  const phase = !turn ? "draft complete" : draft.tab === "bans" ? "bans" : `${side === "A" ? "our" : "enemy"} pick`;
   const payload = {
     map: ctx.mapObj.map, mode: modeName(ctx.mode), games: ctx.battles, bracket: BRACKETS[ctx.bracket],
-    phase: `${ours ? "our" : "enemy"} ${ak}`, weFirst: draft.weFirst,
+    phase, weFirst: draft.weFirst,
     ourPicks: A.map(bname), enemyPicks: B.map(bname), bans: bans.map(bname),
     brawlerInfo: Object.fromEntries([...A, ...B].map((x) => [bname(x), [roleOf(x), statLine(x)].filter(Boolean).join(", ")])),
     winChance: +(winProbability(ctx, A, B) * 100).toFixed(1),
-    suggestions: top.map((s) => ({ brawler: bname(s.id), projectedWin: +((s.projected ?? s.win) * 100).toFixed(1), winNow: +(s.win * 100).toFixed(1), mapWR: +(s.map.p * 100).toFixed(1),
+    suggestions: top.map((s) => ({ brawler: bname(s.id), projectedWin: +(recValue(s) * 100).toFixed(1), winNow: +(s.win * 100).toFixed(1), mapWR: +(s.map.p * 100).toFixed(1),
       games: s.map.games, reasons: s.reasons.slice(0, 3).map((r) => `${r.kind} ${bname(r.with)}`), counterRisk: s.threats.map(bname),
       role: roleOf(s.id), stats: statLine(s.id) })),
     mapMeta: tierList(ctx).S.concat(tierList(ctx).A).slice(0, 10).map((r) => `${bname(r.id)} ${(r.p * 100).toFixed(1)}%`),
@@ -614,7 +695,7 @@ async function load() {
     model.learnedReport = learned;
     model.summaryBrawlers = brawlers.brawlers;
     const saved = store.get("draft", null);
-    draft = saved && model.mapIndex.has(saved.mapKey) ? saved : freshDraft(defaultMap());
+    draft = validDraft(saved) ? saved : freshDraft(defaultMap());
     renderFooter(`${(summary.battles_in_window || 0).toLocaleString()} ranked games · last ${maps.window_days} days · updated ${summary.generated_at ? new Date(summary.generated_at).toLocaleString() : "–"}`);
     route();
   } catch (e) {
