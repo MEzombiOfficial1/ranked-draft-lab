@@ -142,11 +142,13 @@ function applyLearned(ctx, L, mapKey) {
   const lm = L.modes?.[ctx.mode];
   if (!lm) return;
   const lp = L.maps?.[mapKey] || {};
+  const lph = L.maps_high?.[mapKey] || {};
   const n = ctx.ids.length;
   const a = L.blend ?? 1;
+  const high = ctx.bracket === "high";
   for (let i = 0; i < n; i++) {
     const id = ctx.ids[i];
-    ctx.eff[i] = a * ((lm.u?.[id] || 0) + (lp[id] || 0) + (ctx.bracket === "high" ? lm.h?.[id] || 0 : 0)) + (1 - a) * ctx.eff[i];
+    ctx.eff[i] = a * ((lm.u?.[id] || 0) + (lp[id] || 0) + (high ? (lm.h?.[id] || 0) + (lph[id] || 0) : 0)) + (1 - a) * ctx.eff[i];
   }
   for (let k = 0; k < n * n; k++) { ctx.syn[k] *= 1 - a; ctx.ctr[k] *= 1 - a; }
   for (const [x, y, v] of lm.syn || []) {

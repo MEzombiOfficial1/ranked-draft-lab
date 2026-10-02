@@ -20,7 +20,7 @@ while :; do
   python3 collector/export_stats.py --core "$work/core.db" --raw-dir "$work/raw" --out data/stats || exit 1
   python3 collector/calibrate.py --core "$work/core.db" --raw-dir "$work/raw" --out data/stats/model.json || echo "::warning::Calibration failed (non-fatal)"
   python3 collector/brawler_info.py data/stats/brawler_info.json || true
-  { python3 -c "import numpy" 2>/dev/null || pip install --quiet numpy; } &&
+  { python3 -c "import numpy, scipy" 2>/dev/null || pip install --quiet numpy scipy; } &&
     python3 collector/train.py --raw-dir "$work/raw" --stats data/stats --core "$work/core.db" || echo "::warning::Training failed (non-fatal)"
   node collector/selfplay.mjs --stats data/stats --minutes "${SELFPLAY_MINUTES:-3}" || echo "::warning::Self-play failed (non-fatal)"
   python3 collector/ai_notes.py --stats data/stats || echo "::warning::AI notes step failed (non-fatal)"
