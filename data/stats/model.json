@@ -1,16 +1,16 @@
 {
- "generated_at": "2026-10-10T18:25:27Z",
+ "generated_at": "2026-10-10T19:41:04Z",
  "weights": {
   "map": 1.0008,
-  "syn": 0.3856,
-  "ctr": 0.8736
+  "syn": 0.3859,
+  "ctr": 0.8739
  },
  "test_day": "2026-10-10",
  "test_games": 80000,
- "train_games": 39489216,
+ "train_games": 39557536,
  "calibrated": {
   "log_loss": 0.6627,
-  "accuracy": 0.5975,
+  "accuracy": 0.5974,
   "brier": 0.2352
  },
  "uncalibrated": {
