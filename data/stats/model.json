@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-10-22T07:51:54Z",
+ "generated_at": "2026-10-22T08:48:24Z",
  "weights": {
   "map": 0.919,
   "syn": 0.5036,
@@ -7,7 +7,7 @@
  },
  "test_day": "2026-10-22",
  "test_games": 80000,
- "train_games": 76715212,
+ "train_games": 76715351,
  "calibrated": {
   "log_loss": 0.657,
   "accuracy": 0.6028,
