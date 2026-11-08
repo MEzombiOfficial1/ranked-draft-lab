@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-08T09:21:15Z",
+ "generated_at": "2026-11-08T10:18:10Z",
  "weights": {
   "map": 0.7417,
   "syn": 0.2679,
@@ -7,7 +7,7 @@
  },
  "test_day": "2026-11-08",
  "test_games": 80000,
- "train_games": 32448101,
+ "train_games": 32448235,
  "calibrated": {
   "log_loss": 0.6707,
   "accuracy": 0.5843,
@@ -15,7 +15,7 @@
  },
  "uncalibrated": {
   "log_loss": 0.6896,
-  "accuracy": 0.5757,
+  "accuracy": 0.5758,
   "brier": 0.2463
  },
  "coin_flip": {
