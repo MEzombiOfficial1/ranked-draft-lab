@@ -1,21 +1,21 @@
 {
- "generated_at": "2026-11-20T12:30:32Z",
+ "generated_at": "2026-11-20T13:23:42Z",
  "weights": {
-  "map": 1.0249,
-  "syn": 0.7138,
-  "ctr": 0.7745
+  "map": 1.024,
+  "syn": 0.7071,
+  "ctr": 0.7671
  },
  "test_day": "2026-11-20",
  "test_games": 80000,
- "train_games": 11159253,
+ "train_games": 11268941,
  "calibrated": {
   "log_loss": 0.654,
-  "accuracy": 0.6064,
+  "accuracy": 0.6063,
   "brier": 0.2315
  },
  "uncalibrated": {
-  "log_loss": 0.655,
-  "accuracy": 0.6056,
+  "log_loss": 0.6551,
+  "accuracy": 0.6053,
   "brier": 0.2319
  },
  "coin_flip": {
