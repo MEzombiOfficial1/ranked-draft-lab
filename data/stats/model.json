@@ -1,13 +1,13 @@
 {
- "generated_at": "2026-11-22T08:11:21Z",
+ "generated_at": "2026-11-22T09:07:29Z",
  "weights": {
-  "map": 1.0371,
+  "map": 1.037,
   "syn": 0.5519,
-  "ctr": 0.7109
+  "ctr": 0.7108
  },
  "test_day": "2026-11-22",
  "test_games": 80000,
- "train_games": 16019222,
+ "train_games": 16021253,
  "calibrated": {
   "log_loss": 0.6564,
   "accuracy": 0.6026,
@@ -15,7 +15,7 @@
  },
  "uncalibrated": {
   "log_loss": 0.6587,
-  "accuracy": 0.6013,
+  "accuracy": 0.6011,
   "brier": 0.2334
  },
  "coin_flip": {
